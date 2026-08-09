@@ -4,19 +4,41 @@ import logger from '../utils/logger.js';
 
 let io = null;
 
-export const initSocketIO = (httpServer) => {
-  const allowedOrigins = process.env.CLIENT_URL
-    ? process.env.CLIENT_URL.split(',').map((url) => url.trim())
-    : ['http://localhost:5173', 'http://localhost:3000'];
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;
 
+  const clientUrlEnv = process.env.CLIENT_URL;
+  if (!clientUrlEnv || clientUrlEnv === '*') return true;
+
+  const configuredOrigins = clientUrlEnv
+    .split(',')
+    .map((url) => url.trim().replace(/\/+$/, ''));
+
+  const cleanOrigin = origin.replace(/\/+$/, '');
+
+  if (configuredOrigins.includes(cleanOrigin)) return true;
+
+  if (
+    cleanOrigin.endsWith('.vercel.app') ||
+    cleanOrigin.endsWith('.onrender.com') ||
+    cleanOrigin.includes('localhost') ||
+    cleanOrigin.includes('127.0.0.1')
+  ) {
+    return true;
+  }
+
+  return false;
+};
+
+export const initSocketIO = (httpServer) => {
   io = new Server(httpServer, {
     cors: {
       origin: (origin, callback) => {
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
-          return callback(null, true);
+        if (isAllowedOrigin(origin)) {
+          callback(null, true);
+        } else {
+          callback(null, false);
         }
-        return callback(new Error(`Origin ${origin} not allowed by CORS`));
       },
       credentials: true,
       methods: ['GET', 'POST'],

@@ -22,35 +22,64 @@ dotenv.config();
 
 const app = express();
 
+// Enable Trust Proxy for Render, Vercel, reverse proxies
+app.set('trust proxy', 1);
+
 // 1. Helmet Security Headers (HSTS, NoSniff, XSS Filter, Frameguard DENY)
 app.use(
   helmet({
-    contentSecurityPolicy: false, // Set to false if frontend assets loaded locally in dev
+    contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false,
   })
 );
 
-// 2. Strict / Flexible CORS Configuration
-const allowedOrigins = process.env.CLIENT_URL
-  ? process.env.CLIENT_URL.split(',').map((url) => url.trim())
-  : ['http://localhost:5173', 'http://localhost:3000'];
+// 2. Production-Safe CORS Origin Resolution
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true; // Direct API calls, Postman, server-to-server
 
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps, Postman, curl, server-to-server)
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-      return callback(new Error(`Origin ${origin} not allowed by CORS`));
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-    maxAge: 86400, // 24 hours preflight cache
-  })
-);
+  const clientUrlEnv = process.env.CLIENT_URL;
+  if (!clientUrlEnv || clientUrlEnv === '*') return true;
+
+  const configuredOrigins = clientUrlEnv
+    .split(',')
+    .map((url) => url.trim().replace(/\/+$/, ''));
+
+  const cleanOrigin = origin.replace(/\/+$/, '');
+
+  // Match configured URL
+  if (configuredOrigins.includes(cleanOrigin)) return true;
+
+  // Automatically allow all Vercel domains (production & preview branches), Render, and localhost
+  if (
+    cleanOrigin.endsWith('.vercel.app') ||
+    cleanOrigin.endsWith('.onrender.com') ||
+    cleanOrigin.includes('localhost') ||
+    cleanOrigin.includes('127.0.0.1')
+  ) {
+    return true;
+  }
+
+  return false;
+};
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (isAllowedOrigin(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, false); // Deny safely without throwing unhandled 500 exception
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  exposedHeaders: ['Set-Cookie'],
+  maxAge: 86400, // 24 hours preflight cache
+  optionsSuccessStatus: 204,
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
